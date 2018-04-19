@@ -74,15 +74,15 @@ public class ConfigMapWatcher extends BaseWatcher {
                     } catch (Exception e) {
                         logger.log(SEVERE, "Failed to load ConfigMaps: " + e, e);
                     }
-                    try {
-                        String resourceVersion = "0";
-                        if (configMaps == null) {
-                            logger.warning("Unable to get config map list; impacts resource version used for watch");
-                        } else {
-                            resourceVersion = configMaps.getMetadata()
-                                    .getResourceVersion();
-                        }
-                        synchronized(ConfigMapWatcher.this) {
+                    if (GlobalPluginConfiguration.get().isConfigMapWatch()) {
+                        try {
+                            String resourceVersion = "0";
+                            if (configMaps == null) {
+                                logger.warning("Unable to get config map list; impacts resource version used for watch");
+                            } else {
+                                resourceVersion = configMaps.getMetadata()
+                                        .getResourceVersion();
+                            }
                             if (watches.get(namespace) == null) {
                                 logger.info("creating ConfigMap watch for namespace "
                                         + namespace
@@ -97,9 +97,9 @@ public class ConfigMapWatcher extends BaseWatcher {
                                                 resourceVersion)
                                                 .watch(new WatcherCallback<ConfigMap>(ConfigMapWatcher.this,namespace)));
                             }
+                        } catch (Exception e) {
+                            logger.log(SEVERE, "Failed to load ConfigMaps: " + e, e);
                         }
-                    } catch (Exception e) {
-                        logger.log(SEVERE, "Failed to load ConfigMaps: " + e, e);
                     }
                 }
             }

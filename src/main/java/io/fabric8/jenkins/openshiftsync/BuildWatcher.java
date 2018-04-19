@@ -36,8 +36,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.ConcurrentModificationException;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.logging.Level;
@@ -74,7 +75,7 @@ public class BuildWatcher extends BaseWatcher {
     // when both are created in a simultaneous fashion, there is an up to 5
     // minute delay
     // before the job run gets kicked off
-    private static final ConcurrentHashSet<Build> buildsWithNoBCList = new ConcurrentHashSet<>();
+    private static final ConcurrentHashSet<Build> buildsWithNoBCList = new ConcurrentHashSet<Build>();
 
     @SuppressFBWarnings("EI_EXPOSE_REP2")
     public BuildWatcher(String[] namespaces) {
@@ -109,21 +110,25 @@ public class BuildWatcher extends BaseWatcher {
                                 .inNamespace(namespace)
                                 .withField(OPENSHIFT_BUILD_STATUS_FIELD,
                                         BuildPhases.NEW).list();
+                        if (newBuilds != null && newBuilds.getItems() != null)
+                            logger.info("GGM the new build list query returned a sample of size " + newBuilds.getItems().size());
+                        else
+                            logger.info("GGM the new build list query got a null response");
                         onInitialBuilds(newBuilds);
                         logger.fine("handled Build resources");
                     } catch (Exception e) {
                         logger.log(Level.SEVERE,
                                 "Failed to load initial Builds: " + e, e);
                     }
-                    try {
-                        String resourceVersion = "0";
-                        if (newBuilds == null) {
-                            logger.warning("Unable to get build list; impacts resource version used for watch");
-                        } else {
-                            resourceVersion = newBuilds.getMetadata()
-                                    .getResourceVersion();
-                        }
-                        synchronized(BuildWatcher.this) {
+                    if (GlobalPluginConfiguration.get().isBuildWatch()) {
+                        try {
+                            String resourceVersion = "0";
+                            if (newBuilds == null) {
+                                logger.warning("Unable to get build list; impacts resource version used for watch");
+                            } else {
+                                resourceVersion = newBuilds.getMetadata()
+                                        .getResourceVersion();
+                            }
                             if (watches.get(namespace) == null) {
                                 logger.info("creating Build watch for namespace "
                                         + namespace
@@ -140,13 +145,15 @@ public class BuildWatcher extends BaseWatcher {
                                                         BuildWatcher.this,
                                                         namespace)));
                             }
+                        } catch (Exception e) {
+                            logger.log(Level.SEVERE,
+                                    "Failed to load initial Builds: " + e, e);
                         }
-                    } catch (Exception e) {
-                        logger.log(Level.SEVERE,
-                                "Failed to load initial Builds: " + e, e);
                     }
                 }
-                reconcileRunsAndBuilds();
+                if (GlobalPluginConfiguration.get().isReconcileBuildsRuns()) {
+                	reconcileRunsAndBuilds();
+                }
             }
         };
     }
@@ -157,7 +164,7 @@ public class BuildWatcher extends BaseWatcher {
     }
 
     @SuppressFBWarnings("SF_SWITCH_NO_DEFAULT")
-    public synchronized void eventReceived(Action action, Build build) {
+    public void eventReceived(Action action, Build build) {
         if (!OpenShiftUtils.isPipelineStrategyBuild(build))
             return;
         try {
@@ -188,54 +195,51 @@ public class BuildWatcher extends BaseWatcher {
         eventReceived(action, build);
     }
 
-    public synchronized static void onInitialBuilds(BuildList buildList) {
+    public static void onInitialBuilds(BuildList buildList) {
         if (buildList == null)
             return;
         List<Build> items = buildList.getItems();
         if (items != null) {
 
-            Collections.sort(items, new Comparator<Build>() {
-                @Override
-                public int compare(Build b1, Build b2) {
-                    if (b1.getMetadata().getAnnotations() == null
-                            || b1.getMetadata().getAnnotations()
-                                    .get(OPENSHIFT_ANNOTATIONS_BUILD_NUMBER) == null) {
-                        logger.warning("cannot compare build "
-                                + b1.getMetadata().getName()
-                                + " from namespace "
-                                + b1.getMetadata().getNamespace()
-                                + ", has bad annotations: "
-                                + b1.getMetadata().getAnnotations());
-                        return 0;
-                    }
-                    if (b2.getMetadata().getAnnotations() == null
-                            || b2.getMetadata().getAnnotations()
-                                    .get(OPENSHIFT_ANNOTATIONS_BUILD_NUMBER) == null) {
-                        logger.warning("cannot compare build "
-                                + b2.getMetadata().getName()
-                                + " from namespace "
-                                + b2.getMetadata().getNamespace()
-                                + ", has bad annotations: "
-                                + b2.getMetadata().getAnnotations());
-                        return 0;
-                    }
-                    int rc = 0;
-                    try {
-                        rc = Long.compare(
-
-                                Long.parseLong(b1
-                                        .getMetadata()
-                                        .getAnnotations()
-                                        .get(OPENSHIFT_ANNOTATIONS_BUILD_NUMBER)),
-                                Long.parseLong(b2
-                                        .getMetadata()
-                                        .getAnnotations()
-                                        .get(OPENSHIFT_ANNOTATIONS_BUILD_NUMBER)));
-                    } catch (Throwable t) {
-                        logger.log(Level.FINE, "onInitialBuilds", t);
-                    }
-                    return rc;
+            Collections.sort(items, (b1, b2) -> {
+                if (b1.getMetadata().getAnnotations() == null
+                        || b1.getMetadata().getAnnotations()
+                                .get(OPENSHIFT_ANNOTATIONS_BUILD_NUMBER) == null) {
+                    logger.warning("cannot compare build "
+                            + b1.getMetadata().getName()
+                            + " from namespace "
+                            + b1.getMetadata().getNamespace()
+                            + ", has bad annotations: "
+                            + b1.getMetadata().getAnnotations());
+                    return 0;
                 }
+                if (b2.getMetadata().getAnnotations() == null
+                        || b2.getMetadata().getAnnotations()
+                                .get(OPENSHIFT_ANNOTATIONS_BUILD_NUMBER) == null) {
+                    logger.warning("cannot compare build "
+                            + b2.getMetadata().getName()
+                            + " from namespace "
+                            + b2.getMetadata().getNamespace()
+                            + ", has bad annotations: "
+                            + b2.getMetadata().getAnnotations());
+                    return 0;
+                }
+                int rc = 0;
+                try {
+                    rc = Long.compare(
+
+                            Long.parseLong(b1
+                                    .getMetadata()
+                                    .getAnnotations()
+                                    .get(OPENSHIFT_ANNOTATIONS_BUILD_NUMBER)),
+                            Long.parseLong(b2
+                                    .getMetadata()
+                                    .getAnnotations()
+                                    .get(OPENSHIFT_ANNOTATIONS_BUILD_NUMBER)));
+                } catch (Throwable t) {
+                    logger.log(Level.FINE, "onInitialBuilds", t);
+                }
+                return rc;
             });
 
             // We need to sort the builds into their build configs so we can
@@ -272,6 +276,9 @@ public class BuildWatcher extends BaseWatcher {
                 }
                 bcBuilds.add(b);
             }
+            
+            logger.info("GGM num of listed builds resulted in these BC:" + buildConfigMap + " and will process this num of BC " + buildConfigBuildMap.size());
+            
 
             // Now handle the builds.
             for (Map.Entry<BuildConfig, List<Build>> buildConfigBuilds : buildConfigBuildMap
@@ -282,8 +289,10 @@ public class BuildWatcher extends BaseWatcher {
                     continue;
                 }
                 WorkflowJob job = getJobFromBuildConfig(bc);
+                logger.info("GGM for bc " + bc.getMetadata().getName() + " found job " + (job != null));
                 if (job == null) {
                     List<Build> builds = buildConfigBuilds.getValue();
+                    logger.info("GGM for bc " + bc.getMetadata().getName() + " will work on  " + builds.size() + " builds");
                     for (Build b : builds) {
                         logger.info("skipping listed new build "
                                 + b.getMetadata().getName()
@@ -310,7 +319,7 @@ public class BuildWatcher extends BaseWatcher {
         }
     }
 
-    private static synchronized void modifyEventToJenkinsJobRun(Build build) {
+    private static void modifyEventToJenkinsJobRun(Build build) {
         BuildStatus status = build.getStatus();
         if (status != null && isCancellable(status) && isCancelled(status)) {
             WorkflowJob job = getJobFromBuild(build);
@@ -325,12 +334,13 @@ public class BuildWatcher extends BaseWatcher {
         }
     }
 
-    public static synchronized boolean addEventToJenkinsJobRun(Build build)
+    public static boolean addEventToJenkinsJobRun(Build build)
             throws IOException {
         // should have been caught upstack, but just in case since public method
         if (!OpenShiftUtils.isPipelineStrategyBuild(build))
             return false;
         BuildStatus status = build.getStatus();
+        logger.info("GGM considering starting build " + build.getMetadata().getName() + " current phase " + status.getPhase());
         if (status != null) {
             if (isCancelled(status)) {
                 updateOpenShiftBuildPhase(build, CANCELLED);
@@ -342,6 +352,7 @@ public class BuildWatcher extends BaseWatcher {
         }
 
         WorkflowJob job = getJobFromBuild(build);
+        logger.info("GGM job for build found " + (job != null));
         if (job != null) {
             return triggerJob(job, build);
         }
@@ -355,17 +366,11 @@ public class BuildWatcher extends BaseWatcher {
         // should have been caught upstack, but just in case since public method
         if (!OpenShiftUtils.isPipelineStrategyBuild(build))
             return;
-        try {
-          buildsWithNoBCList.add(build);
-        } catch (ConcurrentModificationException | IllegalArgumentException |
-          UnsupportedOperationException | NullPointerException e) {
-          logger.log(Level.WARNING,"Failed to add item " +
-            build.getMetadata().getName(), e);
-        }
+        buildsWithNoBCList.add(build);
     }
 
     private static void removeBuildFromNoBCList(Build build) {
-          buildsWithNoBCList.remove(build);
+        buildsWithNoBCList.remove(build);
     }
 
     // trigger any builds whose watch events arrived before the
@@ -398,25 +403,30 @@ public class BuildWatcher extends BaseWatcher {
           }
         }
         if (anyRemoveFailures && buildsWithNoBCList.size() > 0) {
-            buildsWithNoBCList.clear();
+            logger.log(Level.WARNING, "about to clear the build list");
+            synchronized (buildsWithNoBCList) {
+              buildsWithNoBCList.clear();
+            }
         }
     }
 
     // innerDeleteEventToJenkinsJobRun is the actual delete logic at the heart
     // of deleteEventToJenkinsJobRun
     // that is either in a sync block or not based on the presence of a BC uid
-    private static synchronized void innerDeleteEventToJenkinsJobRun(
+    private static void innerDeleteEventToJenkinsJobRun(
             final Build build) throws Exception {
         final WorkflowJob job = getJobFromBuild(build);
         if (job != null) {
-            ACL.impersonate(ACL.SYSTEM,
-                    new NotReallyRoleSensitiveCallable<Void, Exception>() {
-                        @Override
-                        public Void call() throws Exception {
-                            cancelBuild(job, build, true);
-                            return null;
-                        }
-                    });
+            synchronized (job) {
+              ACL.impersonate(ACL.SYSTEM,
+                new NotReallyRoleSensitiveCallable<Void, Exception>() {
+                  @Override
+                  public Void call() throws Exception {
+                    cancelBuild(job, build, true);
+                    return null;
+                  }
+                });
+            }
         } else {
             // in case build was created and deleted quickly, prior to seeing BC
             // event, clear out from pre-BC cache
@@ -433,7 +443,7 @@ public class BuildWatcher extends BaseWatcher {
     // delete events and build delete events that arrive concurrently and in a
     // nondeterministic
     // order
-    private static synchronized void deleteEventToJenkinsJobRun(
+    private static void deleteEventToJenkinsJobRun(
             final Build build) throws Exception {
         List<OwnerReference> ownerRefs = build.getMetadata()
                 .getOwnerReferences();
@@ -464,7 +474,7 @@ public class BuildWatcher extends BaseWatcher {
    *
    * Deletes all job runs that do not have an associated build in OpenShift
    */
-  private static synchronized void reconcileRunsAndBuilds() {
+  private static void reconcileRunsAndBuilds() {
     logger.info("Reconciling job runs and builds");
 
     List<WorkflowJob> jobs = Jenkins.getActiveInstance().getAllItems(WorkflowJob.class);
@@ -495,5 +505,4 @@ public class BuildWatcher extends BaseWatcher {
       }
     }
   }
-
 }
