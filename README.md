@@ -1,5 +1,7 @@
 # openshift-jenkins-sync-plugin
 
+Test new prow based ci test jobs
+
 This Jenkins plugin keeps OpenShift BuildConfig and Build objects in sync with Jenkins Jobs and Builds.
 
 The synchronization works like this
