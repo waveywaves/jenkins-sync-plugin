@@ -7,6 +7,7 @@ import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.putJobWithBui
 import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMapper.mapBuildConfigToFlow;
 import static io.fabric8.jenkins.openshiftsync.BuildRunPolicy.SERIAL;
 import static io.fabric8.jenkins.openshiftsync.BuildRunPolicy.SERIAL_LATEST_ONLY;
+import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.DISABLE_PRUNE_PREFIX;
 import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.updateJob;
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.getAnnotation;
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.getFullNameParent;
@@ -16,6 +17,7 @@ import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.jenkinsJobDisplayN
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.jenkinsJobFullName;
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.jenkinsJobName;
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.parseResourceVersion;
+import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.isJobPruningDisabled;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -41,7 +43,7 @@ public class JobProcessor extends NotReallyRoleSensitiveCallable<Void, Exception
 
 	private final BuildConfigWatcher jobProcessor;
 	private final BuildConfig buildConfig;
-    private final static Logger logger = Logger.getLogger(BuildConfigToJobMap.class.getName());
+  private final static Logger logger = Logger.getLogger(BuildConfigToJobMap.class.getName());
 
 	public JobProcessor(BuildConfigWatcher buildConfigWatcher, BuildConfig buildConfig) {
 		jobProcessor = buildConfigWatcher;
@@ -109,14 +111,38 @@ public class JobProcessor extends NotReallyRoleSensitiveCallable<Void, Exception
 		}
 	}
 
+	private BuildConfigProjectProperty updateUID(BuildConfigProjectProperty buildConfigProjectProperty, BuildConfigProjectProperty newProperty){
+    String UID = buildConfigProjectProperty.getUid();
+    String newUID = newProperty.getUid();
+    if (!UID.contains(DISABLE_PRUNE_PREFIX)){
+      buildConfigProjectProperty.setUid(newUID);
+    }
+    if (isJobPruningDisabled(buildConfigProjectProperty) && !UID.contains(DISABLE_PRUNE_PREFIX)) {
+      buildConfigProjectProperty.setUid(DISABLE_PRUNE_PREFIX+UID);
+      logger.info("Prune disabled on Jenkins Job " + jenkinsJobFullName(buildConfig));
+    }
+
+    String oldUID = UID.replace(DISABLE_PRUNE_PREFIX,"");
+    String oldName = buildConfigProjectProperty.getNamespace() + "/" + buildConfigProjectProperty.getNamespace() + "-" + buildConfigProjectProperty.getName();
+    System.out.println("-------------- Comparing names "+jenkinsJobFullName(buildConfig)+"------------ "+oldName);
+    System.out.println("-------------- Comparing UID -------"+UID+"--------"+oldUID+"--------"+newUID);
+
+    if (UID.contains(DISABLE_PRUNE_PREFIX) && !oldUID.equals(newUID) && oldName.equals(jenkinsJobFullName(buildConfig))){
+      logger.info("Migrating WorkflowJob "+jenkinsJobFullName(buildConfig));
+      buildConfigProjectProperty.setUid(newUID);
+    }
+
+    return buildConfigProjectProperty;
+  }
+
 	private Map<String, ParameterDefinition> createOrUpdateJob(Jenkins activeInstance, ItemGroup parent, String jobName,
-			WorkflowJob job, boolean newJob, FlowDefinition flowFromBuildConfig) throws IOException {
+			WorkflowJob job, boolean newJob, FlowDefinition flowFromBuildConfig) throws Exception {
 		job.setDefinition(flowFromBuildConfig);
 
 		String existingBuildRunPolicy = null;
 
 		BuildConfigProjectProperty buildConfigProjectProperty = job.getProperty(BuildConfigProjectProperty.class);
-		existingBuildRunPolicy = populateBCProjectProperty(job, existingBuildRunPolicy, buildConfigProjectProperty);
+    existingBuildRunPolicy = populateBCProjectProperty(job, existingBuildRunPolicy, buildConfigProjectProperty);
 
 		// (re)populate job param list with any envs
 		// from the build config
@@ -160,12 +186,16 @@ public class JobProcessor extends NotReallyRoleSensitiveCallable<Void, Exception
 	}
 
 	private String populateBCProjectProperty(WorkflowJob job, String existingBuildRunPolicy,
-			BuildConfigProjectProperty buildConfigProjectProperty) throws IOException {
+			BuildConfigProjectProperty buildConfigProjectProperty) throws Exception {
 		if (buildConfigProjectProperty != null) {
+
 			existingBuildRunPolicy = buildConfigProjectProperty.getBuildRunPolicy();
+
 			long updatedBCResourceVersion = parseResourceVersion(buildConfig);
 			long oldBCResourceVersion = parseResourceVersion(buildConfigProjectProperty.getResourceVersion());
+
 			BuildConfigProjectProperty newProperty = new BuildConfigProjectProperty(buildConfig);
+
 			if (updatedBCResourceVersion <= oldBCResourceVersion
 					&& newProperty.getUid().equals(buildConfigProjectProperty.getUid())
 					&& newProperty.getNamespace().equals(buildConfigProjectProperty.getNamespace())
@@ -173,13 +203,15 @@ public class JobProcessor extends NotReallyRoleSensitiveCallable<Void, Exception
 					&& newProperty.getBuildRunPolicy().equals(buildConfigProjectProperty.getBuildRunPolicy())) {
 				return null;
 			}
-			buildConfigProjectProperty.setUid(newProperty.getUid());
-			buildConfigProjectProperty.setNamespace(newProperty.getNamespace());
+
+      updateUID(buildConfigProjectProperty, newProperty);
+      buildConfigProjectProperty.setNamespace(newProperty.getNamespace());
 			buildConfigProjectProperty.setName(newProperty.getName());
 			buildConfigProjectProperty.setResourceVersion(newProperty.getResourceVersion());
 			buildConfigProjectProperty.setBuildRunPolicy(newProperty.getBuildRunPolicy());
+
 		} else {
-			job.addProperty(new BuildConfigProjectProperty(buildConfig));
+		  job.addProperty(new BuildConfigProjectProperty(buildConfig));
 		}
 		return existingBuildRunPolicy;
 	}

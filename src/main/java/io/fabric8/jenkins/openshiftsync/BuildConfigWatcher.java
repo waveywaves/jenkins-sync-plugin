@@ -21,6 +21,7 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.BulkChange;
 import hudson.model.ItemGroup;
 import hudson.model.Job;
+import hudson.model.JobProperty;
 import hudson.model.ParameterDefinition;
 import hudson.security.ACL;
 import hudson.triggers.SafeTimerTask;
@@ -37,6 +38,7 @@ import org.apache.tools.ant.filters.StringInputStream;
 import org.eclipse.jetty.util.ConcurrentHashSet;
 import org.jenkinsci.plugins.workflow.flow.FlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
+import org.jenkinsci.plugins.workflow.job.WorkflowJobProperty;
 
 import java.io.InputStream;
 import java.util.List;
@@ -45,16 +47,15 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static io.fabric8.jenkins.openshiftsync.Annotations.DISABLE_JOB_PRUNING;
 import static io.fabric8.jenkins.openshiftsync.Annotations.DISABLE_SYNC_CREATE;
-import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.getJobFromBuildConfig;
-import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.initializeBuildConfigToJobMap;
-import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.putJobWithBuildConfig;
-import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.removeJobWithBuildConfig;
+import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.*;
 import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMapper.mapBuildConfigToFlow;
 import static io.fabric8.jenkins.openshiftsync.BuildRunPolicy.SERIAL;
 import static io.fabric8.jenkins.openshiftsync.BuildRunPolicy.SERIAL_LATEST_ONLY;
 import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_BUILD_STATUS_FIELD;
 import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_LABELS_BUILD_CONFIG_NAME;
+import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.DISABLE_PRUNE_PREFIX;
 import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.updateJob;
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.*;
 import static java.util.logging.Level.SEVERE;
@@ -86,7 +87,7 @@ public class BuildConfigWatcher extends BaseWatcher {
         deletesInProgress.remove(bcID);
     }
 
-    @SuppressFBWarnings("EI_EXPOSE_REP2")
+  @SuppressFBWarnings("EI_EXPOSE_REP2")
     public BuildConfigWatcher(String[] namespaces) {
         super(namespaces);
     }
@@ -167,7 +168,7 @@ public class BuildConfigWatcher extends BaseWatcher {
                 upsertJob(buildConfig);
                 break;
             case DELETED:
-                deleteEventToJenkinsJob(buildConfig);
+                  deleteEventToJenkinsJob(buildConfig);
                 break;
             case MODIFIED:
                 modifyEventToJenkinsJob(buildConfig);
@@ -293,17 +294,32 @@ public class BuildConfigWatcher extends BaseWatcher {
     // nondeterministic
     // order
     private void deleteEventToJenkinsJob(final BuildConfig buildConfig) throws Exception {
-        String bcUid = buildConfig.getMetadata().getUid();
+      String bcUid = buildConfig.getMetadata().getUid();
+      String jobUid = "";
+      String bcName = buildConfig.getMetadata().getName();
+      String bcNamespace = buildConfig.getMetadata().getNamespace();
+
+      WorkflowJob job = getJobFromBuildConfigNameNamespace(bcName, bcNamespace);
+      List<JobProperty<? super WorkflowJob>> jobProperties = job.getAllProperties();
+      for (JobProperty<? super WorkflowJob> jobProperty : jobProperties) {
+        System.out.println(jobProperty.toString());
+        if (jobProperty instanceof BuildConfigProjectProperty) {
+          jobUid = ((BuildConfigProjectProperty) jobProperty).getUid();
+        }
+      }
+
+      if (!jobUid.contains(DISABLE_PRUNE_PREFIX)) {
         if (bcUid != null && bcUid.length() > 0) {
-            // employ intern of the BC UID to facilitate sync'ing on the same
-            // actual object
-            bcUid = bcUid.intern();
-            synchronized (bcUid) {
-                innerDeleteEventToJenkinsJob(buildConfig);
-                return;
-            }
+          // employ intern of the BC UID to facilitate sync'ing on the same
+          // actual object
+          bcUid = bcUid.intern();
+          synchronized (bcUid) {
+            innerDeleteEventToJenkinsJob(buildConfig);
+            return;
+          }
         }
         // uid should not be null / empty, but just in case, still clean up
         innerDeleteEventToJenkinsJob(buildConfig);
+      }
     }
 }

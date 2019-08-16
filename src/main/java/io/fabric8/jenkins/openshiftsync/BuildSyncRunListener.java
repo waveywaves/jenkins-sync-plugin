@@ -209,7 +209,7 @@ public class BuildSyncRunListener extends RunListener<Run> {
         }
 
         RunExt wfRunExt = RunExt.create((WorkflowRun) run);
-
+        String displayName = run.getDisplayName();
         // try blue run
         BlueRun blueRun = null;
         try {

@@ -28,6 +28,7 @@ import jenkins.model.Jenkins;
 import jenkins.security.NotReallyRoleSensitiveCallable;
 
 import org.apache.commons.lang.StringUtils;
+import org.jenkinsci.plugins.workflow.flow.FlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 
@@ -49,17 +50,8 @@ import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.getJobFromBui
 import static io.fabric8.jenkins.openshiftsync.BuildPhases.CANCELLED;
 import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_ANNOTATIONS_BUILD_NUMBER;
 import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_BUILD_STATUS_FIELD;
-import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.cancelBuild;
-import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.deleteRun;
-import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.getJobFromBuild;
-import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.handleBuildList;
-import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.triggerJob;
-import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.getAuthenticatedOpenShiftClient;
-import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.isCancellable;
-import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.isCancelled;
-import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.isNew;
-import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.updateOpenShiftBuildPhase;
-import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.getAnnotation;
+import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.*;
+import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.*;
 import static java.util.logging.Level.WARNING;
 
 public class BuildWatcher extends BaseWatcher {
@@ -414,8 +406,7 @@ public class BuildWatcher extends BaseWatcher {
     // innerDeleteEventToJenkinsJobRun is the actual delete logic at the heart
     // of deleteEventToJenkinsJobRun
     // that is either in a sync block or not based on the presence of a BC uid
-    private static void innerDeleteEventToJenkinsJobRun(
-            final Build build) throws Exception {
+    private static void innerDeleteEventToJenkinsJobRun(final Build build) throws Exception {
         final WorkflowJob job = getJobFromBuild(build);
         if (job != null) {
           ACL.impersonate(ACL.SYSTEM,
@@ -443,10 +434,8 @@ public class BuildWatcher extends BaseWatcher {
     // delete events and build delete events that arrive concurrently and in a
     // nondeterministic
     // order
-    private static void deleteEventToJenkinsJobRun(
-            final Build build) throws Exception {
-        List<OwnerReference> ownerRefs = build.getMetadata()
-                .getOwnerReferences();
+    private static void deleteEventToJenkinsJobRun(final Build build) throws Exception {
+        List<OwnerReference> ownerRefs = build.getMetadata().getOwnerReferences();
         String bcUid = null;
         for (OwnerReference ref : ownerRefs) {
             if ("BuildConfig".equals(ref.getKind()) && ref.getUid() != null
@@ -456,8 +445,7 @@ public class BuildWatcher extends BaseWatcher {
                 bcUid = ref.getUid().intern();
                 synchronized (bcUid) {
                     // if entire job already deleted via bc delete, just return
-                    if (getJobFromBuildConfigNameNamespace(getAnnotation(build, BUILDCONFIG_NAME),
-                            build.getMetadata().getNamespace()) == null) {
+                    if (getJobFromBuildConfigNameNamespace(getAnnotation(build, BUILDCONFIG_NAME), build.getMetadata().getNamespace()) == null) {
                       return;
                     }
                     innerDeleteEventToJenkinsJobRun(build);
@@ -485,26 +473,22 @@ public class BuildWatcher extends BaseWatcher {
       if (property == null || StringUtils.isBlank(property.getNamespace()) || StringUtils.isBlank(property.getName())) {
         continue;
       }
-
       logger.info("Checking job " + job.toString() + " runs for BuildConfig " + property.getNamespace() + "/" + property.getName());
-
-      BuildList buildList = getAuthenticatedOpenShiftClient().builds()
-        .inNamespace(property.getNamespace()).withLabel("buildconfig=" + property.getName()).list();
-
+      BuildList buildList = getAuthenticatedOpenShiftClient().builds().inNamespace(property.getNamespace()).withLabel("buildconfig=" + property.getName()).list();
       for (WorkflowRun run : job.getBuilds()) {
         boolean found = false;
         BuildCause cause = run.getCause(BuildCause.class);
         for (Build build : buildList.getItems()) {
-          if (cause != null && cause.getUid().equals(build.getMetadata().getUid())) {
+          String buildUID = build.getMetadata().getUid();
+          if (cause != null && (cause.getUid().equals(buildUID))) {
             found = true;
             break;
           }
         }
         if (!found) {
-          deleteRun(run);
+          deleteRunIfPruneEnabled(run, property);
         }
       }
     }
   }
-
 }

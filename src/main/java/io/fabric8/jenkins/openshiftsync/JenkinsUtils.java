@@ -15,6 +15,7 @@
  */
 package io.fabric8.jenkins.openshiftsync;
 
+import static io.fabric8.jenkins.openshiftsync.Annotations.DISABLE_JOB_PRUNING;
 import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.getJobFromBuildConfig;
 import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.putJobWithBuildConfig;
 import static io.fabric8.jenkins.openshiftsync.BuildPhases.CANCELLED;
@@ -26,9 +27,7 @@ import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_ANNOTATIONS_B
 import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_BUILD_STATUS_FIELD;
 import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_LABELS_BUILD_CONFIG_NAME;
 import static io.fabric8.jenkins.openshiftsync.CredentialsUtils.updateSourceCredentials;
-import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.getAuthenticatedOpenShiftClient;
-import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.isCancelled;
-import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.updateOpenShiftBuildPhase;
+import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.*;
 import static java.util.Collections.sort;
 import static java.util.logging.Level.SEVERE;
 import static java.util.logging.Level.WARNING;
@@ -107,8 +106,9 @@ public class JenkinsUtils {
 
 	private static final Logger LOGGER = Logger.getLogger(JenkinsUtils.class.getName());
 	private static final String PARAM_FROM_ENV_DESCRIPTION = "From OpenShift Build Environment Variable";
+  public static final String DISABLE_PRUNE_PREFIX = "prune-disabled-";
 
-	public static Job getJob(String job) {
+  public static Job getJob(String job) {
 		TopLevelItem item = Jenkins.getActiveInstance().getItem(job);
 		if (item instanceof Job) {
 			return (Job) item;
@@ -520,7 +520,7 @@ public class JenkinsUtils {
 	        for (WorkflowRun run : job.getBuilds()) {
 	            BuildCause cause = run.getCause(BuildCause.class);
 	            if (cause != null && cause.getUid().equals(buildUid)) {
-	                return run;
+                return run;
 	            }
 	        }
 	    } catch (Throwable t) {
@@ -536,6 +536,16 @@ public class JenkinsUtils {
 		return null;
 	}
 
+  public static void deleteRunIfPruneEnabled(WorkflowRun run, BuildConfigProjectProperty buildConfigProjectProperty){
+      BuildCause cause = run.getCause(BuildCause.class);
+      if (isJobPruningDisabled(buildConfigProjectProperty) || cause.getUid().contains(DISABLE_PRUNE_PREFIX)) {
+        BuildConfig buildConfig = buildConfigProjectProperty.getBuildConfig();
+        LOGGER.info("Prune disabled on Jenkins Job " + jenkinsJobFullName(buildConfig));
+      } else {
+        deleteRun(run);
+      }
+  }
+
 	public static void deleteRun(WorkflowRun run) {
 			try {
 			  LOGGER.info("Deleting run: " + run.toString());
@@ -545,9 +555,11 @@ public class JenkinsUtils {
 			}
 	}
 
+
   public static void deleteRun(WorkflowJob job, Build build) {
       WorkflowRun run = getRun(job, build);
-      deleteRun(run);
+      BuildConfigProjectProperty buildConfigProjectProperty = job.getProperty(BuildConfigProjectProperty.class);
+      deleteRunIfPruneEnabled(run, buildConfigProjectProperty);
   }
 
 	private static boolean cancelRunningBuild(WorkflowJob job, Build build) {

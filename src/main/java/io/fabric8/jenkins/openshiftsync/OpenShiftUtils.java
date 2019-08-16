@@ -68,11 +68,15 @@ import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static io.fabric8.jenkins.openshiftsync.Annotations.DISABLE_JOB_PRUNING;
 import static io.fabric8.jenkins.openshiftsync.BuildPhases.NEW;
 import static io.fabric8.jenkins.openshiftsync.BuildPhases.PENDING;
 import static io.fabric8.jenkins.openshiftsync.BuildPhases.RUNNING;
 import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_DEFAULT_NAMESPACE;
+import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.getBuildConfigName;
 import static java.util.logging.Level.FINE;
+
+import static  io.fabric8.jenkins.openshiftsync.JenkinsUtils.DISABLE_PRUNE_PREFIX;
 
 /**
  */
@@ -656,6 +660,19 @@ public class OpenShiftUtils {
         }
         return null;
     }
+
+    public static boolean isJobPruningDisabled(BuildConfigProjectProperty buildConfigProjectProperty){
+        BuildConfig buildConfig = buildConfigProjectProperty.getBuildConfig();
+        if (buildConfig != null){
+          String UID = buildConfigProjectProperty.getUid();
+          String disableJobPruning = getAnnotation(buildConfig, DISABLE_JOB_PRUNING);
+          if ((disableJobPruning != null && disableJobPruning.length() > 0) || UID.contains(DISABLE_PRUNE_PREFIX) ) {
+            return true;
+          }
+        }
+        return false;
+    }
+
 
     abstract class StatelessReplicationControllerMixIn extends
             ReplicationController {
