@@ -14,54 +14,7 @@
  * limitations under the License.
  */
 package io.fabric8.jenkins.openshiftsync;
-
-import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.getJobFromBuildConfig;
-import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.putJobWithBuildConfig;
-import static io.fabric8.jenkins.openshiftsync.BuildPhases.CANCELLED;
-import static io.fabric8.jenkins.openshiftsync.BuildPhases.PENDING;
-import static io.fabric8.jenkins.openshiftsync.BuildRunPolicy.SERIAL;
-import static io.fabric8.jenkins.openshiftsync.BuildRunPolicy.SERIAL_LATEST_ONLY;
-import static io.fabric8.jenkins.openshiftsync.BuildWatcher.addEventToJenkinsJobRun;
-import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_ANNOTATIONS_BUILD_NUMBER;
-import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_BUILD_STATUS_FIELD;
-import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_LABELS_BUILD_CONFIG_NAME;
-import static io.fabric8.jenkins.openshiftsync.CredentialsUtils.updateSourceCredentials;
-import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.getAuthenticatedOpenShiftClient;
-import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.isCancelled;
-import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.updateOpenShiftBuildPhase;
-import static java.util.Collections.sort;
-import static java.util.logging.Level.SEVERE;
-import static java.util.logging.Level.WARNING;
-import static org.apache.commons.lang.StringUtils.isBlank;
-
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.URISyntaxException;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-
-import javax.xml.transform.Source;
-import javax.xml.transform.stream.StreamSource;
-
-import org.apache.commons.lang.StringUtils;
-import org.apache.tools.ant.filters.StringInputStream;
-import org.csanchez.jenkins.plugins.kubernetes.KubernetesCloud;
-import org.csanchez.jenkins.plugins.kubernetes.PodTemplate;
-import org.csanchez.jenkins.plugins.kubernetes.PodVolumes;
-import org.eclipse.jgit.transport.URIish;
-import org.jenkinsci.plugins.workflow.job.WorkflowJob;
-import org.jenkinsci.plugins.workflow.job.WorkflowRun;
-
 import com.cloudbees.plugins.credentials.CredentialsParameterDefinition;
-
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.AbortException;
 import hudson.model.Action;
@@ -71,12 +24,12 @@ import hudson.model.CauseAction;
 import hudson.model.ChoiceParameterDefinition;
 import hudson.model.FileParameterDefinition;
 import hudson.model.Job;
+import hudson.model.Queue;
 import hudson.model.ParameterDefinition;
 import hudson.model.ParameterValue;
 import hudson.model.ParametersAction;
 import hudson.model.ParametersDefinitionProperty;
 import hudson.model.PasswordParameterDefinition;
-import hudson.model.Queue;
 import hudson.model.RunParameterDefinition;
 import hudson.model.StringParameterDefinition;
 import hudson.model.StringParameterValue;
@@ -100,6 +53,49 @@ import io.fabric8.openshift.api.model.SourceRevision;
 import jenkins.model.Jenkins;
 import jenkins.security.NotReallyRoleSensitiveCallable;
 import jenkins.util.Timer;
+import org.apache.commons.lang.StringUtils;
+import org.apache.tools.ant.filters.StringInputStream;
+import org.csanchez.jenkins.plugins.kubernetes.KubernetesCloud;
+import org.csanchez.jenkins.plugins.kubernetes.PodTemplate;
+import org.csanchez.jenkins.plugins.kubernetes.PodVolumes;
+import org.eclipse.jgit.transport.URIish;
+import org.jenkinsci.plugins.workflow.job.WorkflowJob;
+import org.jenkinsci.plugins.workflow.job.WorkflowRun;
+
+import javax.xml.transform.Source;
+import javax.xml.transform.stream.StreamSource;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.getJobFromBuildConfig;
+import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.putJobWithBuildConfig;
+import static io.fabric8.jenkins.openshiftsync.BuildPhases.CANCELLED;
+import static io.fabric8.jenkins.openshiftsync.BuildPhases.PENDING;
+import static io.fabric8.jenkins.openshiftsync.BuildRunPolicy.SERIAL;
+import static io.fabric8.jenkins.openshiftsync.BuildRunPolicy.SERIAL_LATEST_ONLY;
+import static io.fabric8.jenkins.openshiftsync.BuildWatcher.addEventToJenkinsJobRun;
+import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_ANNOTATIONS_BUILD_NUMBER;
+import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_BUILD_STATUS_FIELD;
+import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_LABELS_BUILD_CONFIG_NAME;
+import static io.fabric8.jenkins.openshiftsync.CredentialsUtils.updateSourceCredentials;
+import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.getAuthenticatedOpenShiftClient;
+import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.isCancelled;
+import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.updateOpenShiftBuildPhase;
+import static java.util.Collections.sort;
+import static java.util.logging.Level.SEVERE;
+import static java.util.logging.Level.WARNING;
+import static org.apache.commons.lang.StringUtils.isBlank;
 
 /**
  */
@@ -430,6 +426,7 @@ public class JenkinsUtils {
             List<Action> buildActions = new ArrayList<>();
             CauseAction bCauseAction = new CauseAction(newCauses);
             buildActions.add(bCauseAction);
+            BuildToActionMapper.addCauseAction(build.getMetadata().getName(),bCauseAction);
 
             BuildSpec spec = build.getSpec();
             GitBuildSource gitBuildSource = spec.getSource().getGit();
