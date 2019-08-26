@@ -1,58 +1,43 @@
-/**
- * Copyright (C) 2017 Red Hat, Inc.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *         http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package io.fabric8.jenkins.openshiftsync;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-
+import hudson.model.Action;
+import hudson.model.Cause;
 import hudson.model.CauseAction;
-import hudson.model.ParametersAction;
+import io.fabric8.openshift.api.model.Build;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class BuildToActionMapper {
+  private static final Logger LOGGER = Logger.getLogger(BuildToActionMapper.class.getName());
 
-    private static Map<String, ParametersAction> buildToParametersMap;
-    private static Map<String, CauseAction> buildToCauseMap;
-
-    private BuildToActionMapper() {
-    }
-
-    static synchronized void initialize() {
-        if (buildToParametersMap == null) {
-            buildToParametersMap = new ConcurrentHashMap<String, ParametersAction>();
+  public static List<Action> updateCauseActionFromBuild(Build build, BuildConfigProjectProperty buildConfigProject) {
+    // We need to ensure that we do not remove existing Causes from a Run since
+    // other plugins may rely on them.
+    List<Cause> newCauses = new ArrayList<>();
+    newCauses.add(new BuildCause(build, buildConfigProject.getUid()));
+    CauseAction originalCauseAction = BuildToActionMap.removeCauseAction(build.getMetadata().getName());
+    if (originalCauseAction != null) {
+        if (LOGGER.isLoggable(Level.FINE)) {
+            LOGGER.fine("Adding existing causes...");
+            for (Cause c : originalCauseAction.getCauses()) {
+                LOGGER.fine("original cause: " + c.getShortDescription());
+            }
         }
-        if (buildToCauseMap == null) {
-            buildToCauseMap = new ConcurrentHashMap<String, CauseAction>();
+        newCauses.addAll(originalCauseAction.getCauses());
+        if (LOGGER.isLoggable(Level.FINE)) {
+            for (Cause c : newCauses) {
+                LOGGER.fine("new cause: " + c.getShortDescription());
+            }
         }
     }
 
-    static synchronized void addParameterAction(String buildId,
-            ParametersAction params) {
-        buildToParametersMap.put(buildId, params);
-    }
-
-    static synchronized ParametersAction removeParameterAction(String buildId) {
-        return buildToParametersMap.remove(buildId);
-    }
-
-    static synchronized void addCauseAction(String buildId, CauseAction cause) {
-        buildToCauseMap.put(buildId, cause);
-    }
-
-    static synchronized CauseAction removeCauseAction(String buildId) {
-        return buildToCauseMap.remove(buildId);
-    }
-
+    List<Action> buildActions = new ArrayList<>();
+    CauseAction bCauseAction = new CauseAction(newCauses);
+    buildActions.add(bCauseAction);
+    BuildToActionMap.addCauseAction(build.getMetadata().getName(),bCauseAction);
+    return buildActions;
+  }
 }

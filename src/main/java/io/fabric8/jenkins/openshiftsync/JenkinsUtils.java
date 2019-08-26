@@ -20,7 +20,6 @@ import hudson.AbortException;
 import hudson.model.Action;
 import hudson.model.BooleanParameterDefinition;
 import hudson.model.Cause;
-import hudson.model.CauseAction;
 import hudson.model.ChoiceParameterDefinition;
 import hudson.model.FileParameterDefinition;
 import hudson.model.Job;
@@ -238,7 +237,7 @@ public class JenkinsUtils {
 			job.addProperty(new ParametersDefinitionProperty(newParamList));
 		}
 		// force save here ... seen some timing issues with concurrent job updates and run initiations
-        InputStream jobStream = new StringInputStream(new XStream2().toXML(job));
+    InputStream jobStream = new StringInputStream(new XStream2().toXML(job));
 		updateJob(job, jobStream, null, null);
 		return paramMap;
 	}
@@ -402,31 +401,7 @@ public class JenkinsUtils {
             }
 
             updateSourceCredentials(buildConfig);
-
-            // We need to ensure that we do not remove existing Causes from a Run since
-            // other plugins may rely on them.
-            List<Cause> newCauses = new ArrayList<>();
-            newCauses.add(new BuildCause(build, buildConfigProject.getUid()));
-            CauseAction originalCauseAction = BuildToActionMapper.removeCauseAction(build.getMetadata().getName());
-            if (originalCauseAction != null) {
-                if (LOGGER.isLoggable(Level.FINE)) {
-                    LOGGER.fine("Adding existing causes...");
-                    for (Cause c : originalCauseAction.getCauses()) {
-                        LOGGER.fine("original cause: " + c.getShortDescription());
-                    }
-                }
-                newCauses.addAll(originalCauseAction.getCauses());
-                if (LOGGER.isLoggable(Level.FINE)) {
-                    for (Cause c : newCauses) {
-                        LOGGER.fine("new cause: " + c.getShortDescription());
-                    }
-                }
-            }
-
-            List<Action> buildActions = new ArrayList<>();
-            CauseAction bCauseAction = new CauseAction(newCauses);
-            buildActions.add(bCauseAction);
-            BuildToActionMapper.addCauseAction(build.getMetadata().getName(),bCauseAction);
+            List<Action> buildActions = BuildToActionMapper.updateCauseActionFromBuild(build, buildConfigProject);
 
             BuildSpec spec = build.getSpec();
             GitBuildSource gitBuildSource = spec.getSource().getGit();
@@ -444,15 +419,15 @@ public class JenkinsUtils {
                 }
             }
 
-            ParametersAction userProvidedParams = BuildToActionMapper
-                    .removeParameterAction(build.getMetadata().getName());
-            // grab envs from actual build in case user overrode default values
+            ParametersAction userProvidedParams = BuildToActionMap.removeParameterAction(build.getMetadata().getName());
+            // grab envs from actual build in case user override default values
             // via `oc start-build -e`
             JenkinsPipelineBuildStrategy strat = spec.getStrategy().getJenkinsPipelineStrategy();
             // only add new param defs for build envs which are not in build
             // config envs
             Map<String, ParameterDefinition> paramMap = addJobParamForBuildEnvs(job, strat, false);
             verifyEnvVars(paramMap, job, buildConfig);
+
             if (userProvidedParams == null) {
                 LOGGER.fine("setting all job run params since this was either started via oc, or started from the UI "
                         + "with no build parameters");
@@ -482,8 +457,8 @@ public class JenkinsUtils {
             return false;
         }
     }
-    
-	private static boolean isAlreadyTriggered(WorkflowJob job, Build build) {
+
+  private static boolean isAlreadyTriggered(WorkflowJob job, Build build) {
 		return getRun(job, build) != null;
 	}
 

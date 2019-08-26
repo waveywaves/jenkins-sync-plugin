@@ -80,7 +80,7 @@ public class BuildDecisionHandler extends Queue.QueueDecisionHandler {
                     LOGGER.fine("ParametersAction: " + params.toString());
                 }
                 if (params != null && ret != null)
-                    BuildToActionMapper.addParameterAction(ret.getMetadata()
+                    BuildToActionMap.addParameterAction(ret.getMetadata()
                             .getName(), params);
 
                 CauseAction cause = dumpCause(actions);
@@ -91,7 +91,7 @@ public class BuildDecisionHandler extends Queue.QueueDecisionHandler {
                     }
                 }
                 if (cause != null && ret != null)
-                    BuildToActionMapper.addCauseAction(ret.getMetadata()
+                    BuildToActionMap.addCauseAction(ret.getMetadata()
                             .getName(), cause);
 
                 return false;

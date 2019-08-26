@@ -151,7 +151,7 @@ public class BuildWatcher extends BaseWatcher {
     }
 
     public void start() {
-        BuildToActionMapper.initialize();
+        BuildToActionMap.initialize();
         super.start();
     }
 
