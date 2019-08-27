@@ -122,8 +122,6 @@ public class JobProcessor extends NotReallyRoleSensitiveCallable<Void, Exception
 
     String oldUID = UID.replace(DISABLE_PRUNE_PREFIX,"");
     String oldName = buildConfigProjectProperty.getNamespace() + "/" + buildConfigProjectProperty.getNamespace() + "-" + buildConfigProjectProperty.getName();
-    System.out.println("-------------- Comparing names "+jenkinsJobFullName(buildConfig)+"------------ "+oldName);
-    System.out.println("-------------- BuildConfigUID updated from -------"+UID+"--------"+oldUID+"--------"+newUID);
 
     if (UID.startsWith(DISABLE_PRUNE_PREFIX) && !oldUID.equals(newUID) && oldName.equals(jenkinsJobFullName(buildConfig))){
       logger.info("Migrating WorkflowJob "+jenkinsJobFullName(buildConfig));

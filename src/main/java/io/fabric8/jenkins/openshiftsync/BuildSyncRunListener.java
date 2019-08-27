@@ -23,7 +23,6 @@ import com.cloudbees.workflow.rest.external.StageNodeExt;
 import com.cloudbees.workflow.rest.external.StatusExt;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-
 import hudson.Extension;
 import hudson.PluginManager;
 import hudson.model.Result;
@@ -41,15 +40,14 @@ import io.jenkins.blueocean.rest.model.BlueRun;
 import io.jenkins.blueocean.rest.model.BlueRun.BlueRunResult;
 import jenkins.model.Jenkins;
 import jenkins.util.Timer;
-
 import org.apache.commons.httpclient.HttpStatus;
+import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.jenkinsci.plugins.workflow.support.steps.input.InputAction;
 import org.jenkinsci.plugins.workflow.support.steps.input.InputStepExecution;
 import org.kohsuke.stapler.DataBoundConstructor;
 
 import javax.annotation.Nonnull;
-
 import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
@@ -64,6 +62,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static io.fabric8.jenkins.openshiftsync.Annotations.DISABLE_JOB_PRUNING;
 import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_ANNOTATIONS_JENKINS_BUILD_URI;
 import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_ANNOTATIONS_JENKINS_LOG_URL;
 import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_ANNOTATIONS_JENKINS_NAMESPACE;
@@ -72,6 +71,7 @@ import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_ANNOTATIONS_J
 import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.maybeScheduleNext;
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.formatTimestamp;
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.getAuthenticatedOpenShiftClient;
+import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.isJobPruningDisabled;
 import static java.net.HttpURLConnection.HTTP_NOT_FOUND;
 import static java.util.logging.Level.FINE;
 import static java.util.logging.Level.SEVERE;
@@ -177,13 +177,19 @@ public class BuildSyncRunListener extends RunListener<Run> {
 
     @Override
     public void onDeleted(Run run) {
+      WorkflowJob job = ((WorkflowRun) run).getParent();
         if (shouldPollRun(run)) {
             runsToPoll.remove(run);
             pollRun(run);
             logger.info("onDeleted " + run.getUrl());
-            maybeScheduleNext(((WorkflowRun) run).getParent());
+            maybeScheduleNext(job);
         }
-        super.onDeleted(run);
+
+        if (isJobPruningDisabled(job.getProperty(BuildConfigProjectProperty.class))){
+            logger.info("Pruning Runs disabled via Annotation "+DISABLE_JOB_PRUNING);
+        } else {
+          super.onDeleted(run);
+        }
     }
 
     @Override
@@ -472,7 +478,6 @@ public class BuildSyncRunListener extends RunListener<Run> {
                 throw e;
             }
         }
-
         cause.setNumFlowNodes(newNumFlowNodes);
         cause.setNumStages(newNumStages);
         cause.setLastUpdateToOpenshift(TimeUnit.NANOSECONDS.toMillis(System

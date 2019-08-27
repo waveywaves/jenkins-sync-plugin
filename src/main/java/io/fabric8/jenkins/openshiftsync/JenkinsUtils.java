@@ -18,7 +18,6 @@ package io.fabric8.jenkins.openshiftsync;
 import com.cloudbees.plugins.credentials.CredentialsParameterDefinition;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.AbortException;
-import hudson.model.Queue;
 import hudson.model.Action;
 import hudson.model.BooleanParameterDefinition;
 import hudson.model.Cause;
@@ -31,6 +30,7 @@ import hudson.model.ParameterValue;
 import hudson.model.ParametersAction;
 import hudson.model.ParametersDefinitionProperty;
 import hudson.model.PasswordParameterDefinition;
+import hudson.model.Queue;
 import hudson.model.RunParameterDefinition;
 import hudson.model.StringParameterDefinition;
 import hudson.model.StringParameterValue;
@@ -92,8 +92,6 @@ import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_LABELS_BUILD_
 import static io.fabric8.jenkins.openshiftsync.CredentialsUtils.updateSourceCredentials;
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.getAuthenticatedOpenShiftClient;
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.isCancelled;
-import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.isJobPruningDisabled;
-import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.jenkinsJobFullName;
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.updateOpenShiftBuildPhase;
 import static java.util.Collections.sort;
 import static java.util.logging.Level.SEVERE;
@@ -537,10 +535,8 @@ public class JenkinsUtils {
 	}
 
   public static void deleteRunIfPruneEnabled(WorkflowRun run, BuildConfigProjectProperty buildConfigProjectProperty){
-      BuildCause cause = run.getCause(BuildCause.class);
-      if (isJobPruningDisabled(buildConfigProjectProperty) || cause.getUid().contains(DISABLE_PRUNE_PREFIX)) {
-        BuildConfig buildConfig = buildConfigProjectProperty.getBuildConfig();
-        LOGGER.info("Prune disabled on Jenkins Job " + jenkinsJobFullName(buildConfig));
+      if (buildConfigProjectProperty.getUid().startsWith(DISABLE_PRUNE_PREFIX)) {
+        LOGGER.info("Prune disabled on Jenkins Job on BuildConfig" + buildConfigProjectProperty.getName() + "in Namespace "+buildConfigProjectProperty.getNamespace());
       } else {
         deleteRun(run);
       }

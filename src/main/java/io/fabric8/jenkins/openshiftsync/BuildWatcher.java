@@ -26,9 +26,7 @@ import io.fabric8.openshift.api.model.BuildList;
 import io.fabric8.openshift.api.model.BuildStatus;
 import jenkins.model.Jenkins;
 import jenkins.security.NotReallyRoleSensitiveCallable;
-
 import org.apache.commons.lang.StringUtils;
-import org.jenkinsci.plugins.workflow.flow.FlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 
@@ -50,8 +48,18 @@ import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.getJobFromBui
 import static io.fabric8.jenkins.openshiftsync.BuildPhases.CANCELLED;
 import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_ANNOTATIONS_BUILD_NUMBER;
 import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_BUILD_STATUS_FIELD;
-import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.*;
-import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.*;
+import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.cancelBuild;
+import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.deleteRun;
+import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.deleteRunIfPruneEnabled;
+import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.getJobFromBuild;
+import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.handleBuildList;
+import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.triggerJob;
+import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.getAnnotation;
+import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.getAuthenticatedOpenShiftClient;
+import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.isCancellable;
+import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.isCancelled;
+import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.isNew;
+import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.updateOpenShiftBuildPhase;
 import static java.util.logging.Level.WARNING;
 
 public class BuildWatcher extends BaseWatcher {
