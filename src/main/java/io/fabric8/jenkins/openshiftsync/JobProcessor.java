@@ -1,6 +1,24 @@
 package io.fabric8.jenkins.openshiftsync;
 
 
+import com.cloudbees.hudson.plugins.folder.Folder;
+import hudson.AbortException;
+import hudson.BulkChange;
+import hudson.model.ItemGroup;
+import hudson.model.ParameterDefinition;
+import hudson.util.XStream2;
+import io.fabric8.openshift.api.model.BuildConfig;
+import jenkins.model.Jenkins;
+import jenkins.security.NotReallyRoleSensitiveCallable;
+import org.apache.tools.ant.filters.StringInputStream;
+import org.jenkinsci.plugins.workflow.flow.FlowDefinition;
+import org.jenkinsci.plugins.workflow.job.WorkflowJob;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Map;
+import java.util.logging.Logger;
+
 import static io.fabric8.jenkins.openshiftsync.Annotations.DISABLE_SYNC_CREATE;
 import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.getJobFromBuildConfig;
 import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.putJobWithBuildConfig;
@@ -13,31 +31,11 @@ import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.getAnnotation;
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.getFullNameParent;
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.getName;
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.getNamespace;
+import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.isJobPruningDisabled;
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.jenkinsJobDisplayName;
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.jenkinsJobFullName;
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.jenkinsJobName;
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.parseResourceVersion;
-import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.isJobPruningDisabled;
-
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.Map;
-import java.util.logging.Logger;
-
-import org.apache.tools.ant.filters.StringInputStream;
-import org.jenkinsci.plugins.workflow.flow.FlowDefinition;
-import org.jenkinsci.plugins.workflow.job.WorkflowJob;
-
-import com.cloudbees.hudson.plugins.folder.Folder;
-
-import hudson.AbortException;
-import hudson.BulkChange;
-import hudson.model.ItemGroup;
-import hudson.model.ParameterDefinition;
-import hudson.util.XStream2;
-import io.fabric8.openshift.api.model.BuildConfig;
-import jenkins.model.Jenkins;
-import jenkins.security.NotReallyRoleSensitiveCallable;
 
 public class JobProcessor extends NotReallyRoleSensitiveCallable<Void, Exception> {
 
@@ -114,7 +112,7 @@ public class JobProcessor extends NotReallyRoleSensitiveCallable<Void, Exception
 	private BuildConfigProjectProperty updateUID(BuildConfigProjectProperty buildConfigProjectProperty, BuildConfigProjectProperty newProperty){
     String UID = buildConfigProjectProperty.getUid();
     String newUID = newProperty.getUid();
-    if (!UID.contains(DISABLE_PRUNE_PREFIX)){
+    if (!UID.startsWith(DISABLE_PRUNE_PREFIX)){
       buildConfigProjectProperty.setUid(newUID);
     }
     if (isJobPruningDisabled(buildConfigProjectProperty) && !UID.contains(DISABLE_PRUNE_PREFIX)) {
@@ -125,9 +123,9 @@ public class JobProcessor extends NotReallyRoleSensitiveCallable<Void, Exception
     String oldUID = UID.replace(DISABLE_PRUNE_PREFIX,"");
     String oldName = buildConfigProjectProperty.getNamespace() + "/" + buildConfigProjectProperty.getNamespace() + "-" + buildConfigProjectProperty.getName();
     System.out.println("-------------- Comparing names "+jenkinsJobFullName(buildConfig)+"------------ "+oldName);
-    System.out.println("-------------- Comparing UID -------"+UID+"--------"+oldUID+"--------"+newUID);
+    System.out.println("-------------- BuildConfigUID updated from -------"+UID+"--------"+oldUID+"--------"+newUID);
 
-    if (UID.contains(DISABLE_PRUNE_PREFIX) && !oldUID.equals(newUID) && oldName.equals(jenkinsJobFullName(buildConfig))){
+    if (UID.startsWith(DISABLE_PRUNE_PREFIX) && !oldUID.equals(newUID) && oldName.equals(jenkinsJobFullName(buildConfig))){
       logger.info("Migrating WorkflowJob "+jenkinsJobFullName(buildConfig));
       buildConfigProjectProperty.setUid(newUID);
     }

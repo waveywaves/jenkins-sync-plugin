@@ -20,10 +20,9 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
-
-import hudson.model.ItemGroup;
 import hudson.BulkChange;
 import hudson.model.Item;
+import hudson.model.ItemGroup;
 import hudson.util.XStream2;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
@@ -46,7 +45,6 @@ import io.fabric8.openshift.client.DefaultOpenShiftClient;
 import io.fabric8.openshift.client.OpenShiftClient;
 import io.fabric8.openshift.client.OpenShiftConfigBuilder;
 import jenkins.model.Jenkins;
-
 import org.apache.commons.lang.StringUtils;
 import org.apache.tools.ant.filters.StringInputStream;
 import org.joda.time.DateTime;
@@ -73,10 +71,8 @@ import static io.fabric8.jenkins.openshiftsync.BuildPhases.NEW;
 import static io.fabric8.jenkins.openshiftsync.BuildPhases.PENDING;
 import static io.fabric8.jenkins.openshiftsync.BuildPhases.RUNNING;
 import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_DEFAULT_NAMESPACE;
-import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.getBuildConfigName;
+import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.DISABLE_PRUNE_PREFIX;
 import static java.util.logging.Level.FINE;
-
-import static  io.fabric8.jenkins.openshiftsync.JenkinsUtils.DISABLE_PRUNE_PREFIX;
 
 /**
  */
@@ -666,7 +662,7 @@ public class OpenShiftUtils {
         if (buildConfig != null){
           String UID = buildConfigProjectProperty.getUid();
           String disableJobPruning = getAnnotation(buildConfig, DISABLE_JOB_PRUNING);
-          if ((disableJobPruning != null && disableJobPruning.length() > 0) || UID.contains(DISABLE_PRUNE_PREFIX) ) {
+          if ((disableJobPruning != null && disableJobPruning.length() > 0) || UID.startsWith(DISABLE_PRUNE_PREFIX) ) {
             return true;
           }
         }

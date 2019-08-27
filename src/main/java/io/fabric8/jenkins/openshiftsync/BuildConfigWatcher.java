@@ -15,17 +15,11 @@
  */
 package io.fabric8.jenkins.openshiftsync;
 
-import com.cloudbees.hudson.plugins.folder.Folder;
-
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
-import hudson.BulkChange;
-import hudson.model.ItemGroup;
 import hudson.model.Job;
 import hudson.model.JobProperty;
-import hudson.model.ParameterDefinition;
 import hudson.security.ACL;
 import hudson.triggers.SafeTimerTask;
-import hudson.util.XStream2;
 import io.fabric8.kubernetes.client.Watcher.Action;
 import io.fabric8.openshift.api.model.BuildConfig;
 import io.fabric8.openshift.api.model.BuildConfigList;
@@ -33,31 +27,23 @@ import io.fabric8.openshift.api.model.BuildList;
 import jenkins.model.Jenkins;
 import jenkins.security.NotReallyRoleSensitiveCallable;
 import jenkins.util.Timer;
-
-import org.apache.tools.ant.filters.StringInputStream;
 import org.eclipse.jetty.util.ConcurrentHashSet;
-import org.jenkinsci.plugins.workflow.flow.FlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
-import org.jenkinsci.plugins.workflow.job.WorkflowJobProperty;
 
-import java.io.InputStream;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import static io.fabric8.jenkins.openshiftsync.Annotations.DISABLE_JOB_PRUNING;
-import static io.fabric8.jenkins.openshiftsync.Annotations.DISABLE_SYNC_CREATE;
-import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.*;
-import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMapper.mapBuildConfigToFlow;
-import static io.fabric8.jenkins.openshiftsync.BuildRunPolicy.SERIAL;
-import static io.fabric8.jenkins.openshiftsync.BuildRunPolicy.SERIAL_LATEST_ONLY;
+import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.getJobFromBuildConfig;
+import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.getJobFromBuildConfigNameNamespace;
+import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.initializeBuildConfigToJobMap;
+import static io.fabric8.jenkins.openshiftsync.BuildConfigToJobMap.removeJobWithBuildConfig;
 import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_BUILD_STATUS_FIELD;
 import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_LABELS_BUILD_CONFIG_NAME;
 import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.DISABLE_PRUNE_PREFIX;
-import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.updateJob;
-import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.*;
+import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.getAuthenticatedOpenShiftClient;
+import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.isPipelineStrategyBuildConfig;
 import static java.util.logging.Level.SEVERE;
 
 /**
@@ -308,7 +294,7 @@ public class BuildConfigWatcher extends BaseWatcher {
         }
       }
 
-      if (!jobUid.contains(DISABLE_PRUNE_PREFIX)) {
+      if (!jobUid.startsWith(DISABLE_PRUNE_PREFIX)) {
         if (bcUid != null && bcUid.length() > 0) {
           // employ intern of the BC UID to facilitate sync'ing on the same
           // actual object
