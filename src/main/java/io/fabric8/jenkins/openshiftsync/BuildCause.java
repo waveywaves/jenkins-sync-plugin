@@ -103,6 +103,11 @@ public class BuildCause extends Cause {
         return uid;
     }
 
+    public void setUid(String newUid) {
+      this.uid = newUid;
+      uid = newUid;
+    }
+
     public String getNamespace() {
         return namespace;
     }
@@ -121,6 +126,11 @@ public class BuildCause extends Cause {
 
     public String getBuildConfigUid() {
         return buildConfigUid;
+    }
+
+    public void setBuildConfigUid(String newBuildConfigUid) {
+      this.buildConfigUid = newBuildConfigUid;
+      buildConfigUid = newBuildConfigUid;
     }
 
     public int getNumStages() {

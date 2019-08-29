@@ -6,6 +6,7 @@ import hudson.AbortException;
 import hudson.BulkChange;
 import hudson.model.ItemGroup;
 import hudson.model.ParameterDefinition;
+import hudson.model.listeners.RunListener;
 import hudson.util.XStream2;
 import io.fabric8.openshift.api.model.BuildConfig;
 import jenkins.model.Jenkins;
@@ -13,6 +14,7 @@ import jenkins.security.NotReallyRoleSensitiveCallable;
 import org.apache.tools.ant.filters.StringInputStream;
 import org.jenkinsci.plugins.workflow.flow.FlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
+import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -109,29 +111,53 @@ public class JobProcessor extends NotReallyRoleSensitiveCallable<Void, Exception
 		}
 	}
 
-	private BuildConfigProjectProperty updateUID(BuildConfigProjectProperty buildConfigProjectProperty, BuildConfigProjectProperty newProperty){
-    String UID = buildConfigProjectProperty.getUid();
-    String newUID = newProperty.getUid();
-    if (!UID.startsWith(DISABLE_PRUNE_PREFIX)){
-      buildConfigProjectProperty.setUid(newUID);
+	public BuildConfigProjectProperty updateBuildConfigUid(BuildConfigProjectProperty buildConfigProjectProperty, BuildConfigProjectProperty newProperty){
+    String uid = buildConfigProjectProperty.getUid();
+    String newUid = newProperty.getUid();
+    if (!uid.startsWith(DISABLE_PRUNE_PREFIX)){
+      buildConfigProjectProperty.setUid(newUid);
     }
-    if (isJobPruningDisabled(buildConfigProjectProperty) && !UID.contains(DISABLE_PRUNE_PREFIX)) {
-      buildConfigProjectProperty.setUid(DISABLE_PRUNE_PREFIX+UID);
+    if (isJobPruningDisabled(buildConfigProjectProperty) && !uid.contains(DISABLE_PRUNE_PREFIX)) {
+      String pruneDisabledUid = DISABLE_PRUNE_PREFIX+uid;
+      buildConfigProjectProperty.setUid(pruneDisabledUid);
       logger.info("Prune disabled on Jenkins Job " + jenkinsJobFullName(buildConfig));
+      pollRunsForJob(1);
     }
 
-    String oldUID = UID.replace(DISABLE_PRUNE_PREFIX,"");
+    String oldUID = uid.replace(DISABLE_PRUNE_PREFIX,"");
     String oldName = buildConfigProjectProperty.getNamespace() + "/" + buildConfigProjectProperty.getNamespace() + "-" + buildConfigProjectProperty.getName();
 
-    if (UID.startsWith(DISABLE_PRUNE_PREFIX) && !oldUID.equals(newUID) && oldName.equals(jenkinsJobFullName(buildConfig))){
-      logger.info("Migrating WorkflowJob "+jenkinsJobFullName(buildConfig));
-      buildConfigProjectProperty.setUid(newUID);
+    if (uid.startsWith(DISABLE_PRUNE_PREFIX) && !oldUID.equals(newUid) && oldName.equals(jenkinsJobFullName(buildConfig))){
+      buildConfigProjectProperty.setUid(newUid);
+      logger.info("Migrated Jenkins Job "+jenkinsJobFullName(buildConfig));
+      pollRunsForJob(1);
     }
 
     return buildConfigProjectProperty;
   }
 
-	private Map<String, ParameterDefinition> createOrUpdateJob(Jenkins activeInstance, ItemGroup parent, String jobName,
+  public void pollRunsForJob(int retry) {
+    BuildSyncRunListener runListener = null;
+    for (RunListener rl : BuildSyncRunListener.all()){
+      if (rl instanceof BuildSyncRunListener){
+        runListener = (BuildSyncRunListener) rl;
+        break;
+      }
+    }
+    if (runListener != null){
+      WorkflowJob job = getJobFromBuildConfig(buildConfig);
+      for (WorkflowRun run : job.getBuilds()){
+        logger.info("pollRunForJob updating Run "+run.toString());
+        runListener.pollRun(run);
+      }
+    }
+    retry--;
+    if (retry > 0){
+      pollRunsForJob(retry);
+    }
+  }
+
+  private Map<String, ParameterDefinition> createOrUpdateJob(Jenkins activeInstance, ItemGroup parent, String jobName,
 			WorkflowJob job, boolean newJob, FlowDefinition flowFromBuildConfig) throws Exception {
 		job.setDefinition(flowFromBuildConfig);
 
@@ -200,7 +226,7 @@ public class JobProcessor extends NotReallyRoleSensitiveCallable<Void, Exception
 				return null;
 			}
 
-      updateUID(buildConfigProjectProperty, newProperty);
+      updateBuildConfigUid(buildConfigProjectProperty, newProperty);
       buildConfigProjectProperty.setNamespace(newProperty.getNamespace());
 			buildConfigProjectProperty.setName(newProperty.getName());
 			buildConfigProjectProperty.setResourceVersion(newProperty.getResourceVersion());

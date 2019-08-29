@@ -25,6 +25,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import hudson.Extension;
 import hudson.PluginManager;
+import hudson.model.CauseAction;
 import hudson.model.Result;
 import hudson.model.Run;
 import hudson.model.TaskListener;
@@ -68,6 +69,7 @@ import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_ANNOTATIONS_J
 import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_ANNOTATIONS_JENKINS_NAMESPACE;
 import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_ANNOTATIONS_JENKINS_PENDING_INPUT_ACTION_JSON;
 import static io.fabric8.jenkins.openshiftsync.Constants.OPENSHIFT_ANNOTATIONS_JENKINS_STATUS_JSON;
+import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.DISABLE_PRUNE_PREFIX;
 import static io.fabric8.jenkins.openshiftsync.JenkinsUtils.maybeScheduleNext;
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.formatTimestamp;
 import static io.fabric8.jenkins.openshiftsync.OpenShiftUtils.getAuthenticatedOpenShiftClient;
@@ -91,7 +93,7 @@ public class BuildSyncRunListener extends RunListener<Run> {
     private long delayPollPeriodMs = 1000; // 1 seconds
     private static final long maxDelay = 30000;
 
-    private transient ConcurrentLinkedQueue<Run> runsToPoll = new ConcurrentLinkedQueue<>();
+    protected transient ConcurrentLinkedQueue<Run> runsToPoll = new ConcurrentLinkedQueue<>();
 
     private transient AtomicBoolean timerStarted = new AtomicBoolean(false);
 
@@ -136,6 +138,9 @@ public class BuildSyncRunListener extends RunListener<Run> {
                 if (cause != null) {
                     // TODO This should be a link to the OpenShift console.
                     run.setDescription(cause.getShortDescription());
+//                    CauseAction action = new CauseAction(cause);
+//                    if (isJobPruningDisabled(run.getParent().getProperty(BuildConfigProjectProperty.class)))
+//                    run.replaceAction(action);
                 }
             } catch (IOException e) {
                 logger.log(WARNING, "Cannot set build description: " + e);
@@ -209,7 +214,7 @@ public class BuildSyncRunListener extends RunListener<Run> {
         }
     }
 
-    protected void pollRun(Run run) {
+    public void pollRun(Run run) {
         if (!(run instanceof WorkflowRun)) {
             throw new IllegalStateException("Cannot poll a non-workflow run");
         }
@@ -240,9 +245,11 @@ public class BuildSyncRunListener extends RunListener<Run> {
         }
     }
 
-    private boolean shouldUpdateOpenShiftBuild(BuildCause cause,
-            int latestStageNum, int latestNumFlowNodes, StatusExt status) {
+    private boolean shouldUpdateOpenShiftBuild(WorkflowRun run, int latestStageNum, int latestNumFlowNodes, StatusExt status) {
         long currTime = TimeUnit.NANOSECONDS.toMillis(System.nanoTime());
+        BuildCause cause = run.getCause(BuildCause.class);
+        BuildConfigProjectProperty buildConfigProjectProperty = run.getParent().getProperty(BuildConfigProjectProperty.class);
+
         logger.fine(String.format(
                 "shouldUpdateOpenShiftBuild curr time %s last update %s curr stage num %s last stage num %s"
                         + "curr flow num %s last flow num %s status %s",
@@ -287,6 +294,7 @@ public class BuildSyncRunListener extends RunListener<Run> {
             return;
         }
 
+        updateUids(run);
         String namespace = OpenShiftUtils.getNamespacefromPodInputs();
         if (namespace == null)
             namespace = cause.getNamespace();
@@ -311,24 +319,18 @@ public class BuildSyncRunListener extends RunListener<Run> {
                 if (pluginMgr != null) {
                     ClassLoader cl = pluginMgr.uberClassLoader;
                     if (cl != null) {
-                        Class weburlbldr = cl
-                                .loadClass("org.jenkinsci.plugins.blueoceandisplayurl.BlueOceanDisplayURLImpl");
+                        Class weburlbldr = cl.loadClass("org.jenkinsci.plugins.blueoceandisplayurl.BlueOceanDisplayURLImpl");
                         Constructor ctor = weburlbldr.getConstructor();
                         Object displayURL = ctor.newInstance();
-                        Method getRunURLMethod = weburlbldr.getMethod(
-                                "getRunURL", hudson.model.Run.class);
-                        Object blueOceanURI = getRunURLMethod.invoke(
-                                displayURL, run);
+                        Method getRunURLMethod = weburlbldr.getMethod("getRunURL", hudson.model.Run.class);
+                        Object blueOceanURI = getRunURLMethod.invoke(displayURL, run);
                         logsBlueOceanUrl = blueOceanURI.toString();
-                        logsBlueOceanUrl = logsBlueOceanUrl.replaceAll(
-                                "http://unconfigured-jenkins-location/", "");
-                        if (logsBlueOceanUrl.startsWith("http://")
-                                || logsBlueOceanUrl.startsWith("https://"))
+                        logsBlueOceanUrl = logsBlueOceanUrl.replaceAll("http://unconfigured-jenkins-location/", "");
+                        if (logsBlueOceanUrl.startsWith("http://") || logsBlueOceanUrl.startsWith("https://"))
                             // still normalize string
                             logsBlueOceanUrl = joinPaths("", logsBlueOceanUrl);
                         else
-                            logsBlueOceanUrl = joinPaths(rootUrl,
-                                    logsBlueOceanUrl);
+                            logsBlueOceanUrl = joinPaths(rootUrl, logsBlueOceanUrl);
                     }
                 }
             }
@@ -402,8 +404,7 @@ public class BuildSyncRunListener extends RunListener<Run> {
         // override stages in case declarative has fooled base pipeline support
         wfRunExt.setStages(validStageList);
 
-        boolean needToUpdate = this.shouldUpdateOpenShiftBuild(cause,
-                newNumStages, newNumFlowNodes, wfRunExt.getStatus());
+        boolean needToUpdate = this.shouldUpdateOpenShiftBuild((WorkflowRun) run, newNumStages, newNumFlowNodes, wfRunExt.getStatus());
         if (!needToUpdate) {
             return;
         }
@@ -444,33 +445,27 @@ public class BuildSyncRunListener extends RunListener<Run> {
                     .withName(cause.getName())
                     .edit()
                     .editMetadata()
-                    .addToAnnotations(
-                            OPENSHIFT_ANNOTATIONS_JENKINS_STATUS_JSON, json)
-                    .addToAnnotations(OPENSHIFT_ANNOTATIONS_JENKINS_BUILD_URI,
-                            buildUrl)
-                    .addToAnnotations(OPENSHIFT_ANNOTATIONS_JENKINS_LOG_URL,
-                            logsUrl)
-                    .addToAnnotations(
-                            Constants.OPENSHIFT_ANNOTATIONS_JENKINS_CONSOLE_LOG_URL,
-                            logsConsoleUrl)
-                    .addToAnnotations(
-                            Constants.OPENSHIFT_ANNOTATIONS_JENKINS_BLUEOCEAN_LOG_URL,
-                            logsBlueOceanUrl);
+                    .addToAnnotations(OPENSHIFT_ANNOTATIONS_JENKINS_STATUS_JSON, json)
+                    .addToAnnotations(OPENSHIFT_ANNOTATIONS_JENKINS_BUILD_URI, buildUrl)
+                    .addToAnnotations(OPENSHIFT_ANNOTATIONS_JENKINS_LOG_URL, logsUrl)
+                    .addToAnnotations(Constants.OPENSHIFT_ANNOTATIONS_JENKINS_CONSOLE_LOG_URL, logsConsoleUrl)
+                    .addToAnnotations(Constants.OPENSHIFT_ANNOTATIONS_JENKINS_BLUEOCEAN_LOG_URL, logsBlueOceanUrl);
 
-            String jenkinsNamespace = System.getenv("KUBERNETES_NAMESPACE");
-            if (jenkinsNamespace != null && !jenkinsNamespace.isEmpty()) {
-                builder.addToAnnotations(
-                        OPENSHIFT_ANNOTATIONS_JENKINS_NAMESPACE,
-                        jenkinsNamespace);
-            }
-            if (pendingActionsJson != null && !pendingActionsJson.isEmpty()) {
-                builder.addToAnnotations(
-                        OPENSHIFT_ANNOTATIONS_JENKINS_PENDING_INPUT_ACTION_JSON,
-                        pendingActionsJson);
-            }
-            builder.endMetadata().editStatus().withPhase(phase)
-                    .withStartTimestamp(startTime)
-                    .withCompletionTimestamp(completionTime).endStatus().done();
+                String jenkinsNamespace = System.getenv("KUBERNETES_NAMESPACE");
+                if (jenkinsNamespace != null && !jenkinsNamespace.isEmpty()) {
+                  builder.addToAnnotations(
+                    OPENSHIFT_ANNOTATIONS_JENKINS_NAMESPACE,
+                    jenkinsNamespace);
+                }
+                if (pendingActionsJson != null && !pendingActionsJson.isEmpty()) {
+                  builder.addToAnnotations(
+                    OPENSHIFT_ANNOTATIONS_JENKINS_PENDING_INPUT_ACTION_JSON,
+                    pendingActionsJson);
+                }
+                builder.endMetadata().editStatus().withPhase(phase)
+                  .withStartTimestamp(startTime)
+                  .withCompletionTimestamp(completionTime).endStatus().done();
+
         } catch (KubernetesClientException e) {
             if (HTTP_NOT_FOUND == e.getCode()) {
                 runsToPoll.remove(run);
@@ -484,7 +479,44 @@ public class BuildSyncRunListener extends RunListener<Run> {
                 .nanoTime()));
     }
 
-    // annotate the Build with pending input JSON so consoles can do the
+  public void updateUids(Run run) {
+
+      synchronized (run) {
+        BuildCause buildCause = (BuildCause) run.getCause(BuildCause.class);
+        BuildConfigProjectProperty buildConfigProjectProperty = ((WorkflowJob) run.getParent()).getProperty(BuildConfigProjectProperty.class);
+        String uidFromBuildConfigProperty = buildConfigProjectProperty.getUid();
+        String buildConfigUidFromCause = buildCause.getBuildConfigUid();
+        String uidFromCause = buildCause.getUid();
+        logger.info("UPDATING UIDS \n-----UID cause ---- "+uidFromCause+"\n-------BCUID cause -----"+buildConfigUidFromCause+"\n----BCUID bcpp---- "+uidFromBuildConfigProperty);
+        // Put PrunePrefix for Runs if Annotation is given
+        // Check if Uid from BuildConfigProperty starts with PrunePrefix and
+        // Raw BuildConfigUID is same for Cause and BuildConfigProjectProperty
+        if (uidFromBuildConfigProperty.startsWith(DISABLE_PRUNE_PREFIX)
+            && uidFromBuildConfigProperty.replaceAll(DISABLE_PRUNE_PREFIX,"").equals(buildConfigUidFromCause.replaceAll(DISABLE_PRUNE_PREFIX,""))) {
+          logger.info("1.0  Put PrunePrefix for Runs if Annotation is given");
+          // Cause BuildConfigUid does not have PrunePrefix
+          if (!buildConfigUidFromCause.startsWith(DISABLE_PRUNE_PREFIX)) {
+            buildCause.setBuildConfigUid(DISABLE_PRUNE_PREFIX + buildConfigUidFromCause);
+            logger.info("1.1  Cause BuildConfigUid does not have PrunePrefix UPDATE BCUID");
+          }
+          if (!uidFromCause.startsWith(DISABLE_PRUNE_PREFIX)) {
+            buildCause.setUid(DISABLE_PRUNE_PREFIX + uidFromCause);
+            logger.info("1.2  Cause BuildConfigUid does not have PrunePrefix UPDATE UID");
+          }
+          // Migrate Run to New BuildConfig Uid
+          // ProjectProperty BuildConfigUid has PrunePrefix and Cause is a child ProjectProperty then update uid bcuid
+        } else if (!uidFromBuildConfigProperty.startsWith(DISABLE_PRUNE_PREFIX)
+          && !buildConfigUidFromCause.replaceAll(DISABLE_PRUNE_PREFIX, "").equals(uidFromBuildConfigProperty)){
+          buildCause.setBuildConfigUid(uidFromBuildConfigProperty);
+          logger.info("2.1  Migrate Run to New BuildConfig Uid UPDATE BCUID");
+          buildCause.setUid(uidFromCause.replaceAll(DISABLE_PRUNE_PREFIX,""));
+          logger.info("2.2  Migrate Run to New BuildConfig Uid UPDATE UID");
+        }
+        run.replaceAction(new CauseAction(buildCause));
+      }
+  }
+
+  // annotate the Build with pending input JSON so consoles can do the
     // Proceed/Abort stuff if they want
     private String getPendingActionsJson(WorkflowRun run) {
         List<PendingInputActionsExt> pendingInputActions = new ArrayList<PendingInputActionsExt>();
@@ -547,6 +579,7 @@ public class BuildSyncRunListener extends RunListener<Run> {
      * @return true if the should poll the status of this build run
      */
     protected boolean shouldPollRun(Run run) {
+
         return run instanceof WorkflowRun
                 && run.getCause(BuildCause.class) != null
                 && GlobalPluginConfiguration.get().isEnabled();

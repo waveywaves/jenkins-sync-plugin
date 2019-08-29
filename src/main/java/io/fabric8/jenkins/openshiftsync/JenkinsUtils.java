@@ -536,7 +536,7 @@ public class JenkinsUtils {
 
   public static void deleteRunIfPruneEnabled(WorkflowRun run, BuildConfigProjectProperty buildConfigProjectProperty){
       if (buildConfigProjectProperty.getUid().startsWith(DISABLE_PRUNE_PREFIX)) {
-        LOGGER.info("Prune disabled on Jenkins Job on BuildConfig" + buildConfigProjectProperty.getName() + "in Namespace "+buildConfigProjectProperty.getNamespace());
+        LOGGER.info("Prune disabled on Jenkins Job on BuildConfig " + buildConfigProjectProperty.getName() + " in Namespace "+buildConfigProjectProperty.getNamespace());
       } else {
         deleteRun(run);
       }

@@ -91,8 +91,7 @@ public class BuildDecisionHandler extends Queue.QueueDecisionHandler {
                     }
                 }
                 if (cause != null && ret != null)
-                    BuildToActionMapper.addCauseAction(ret.getMetadata()
-                            .getName(), cause);
+                    BuildToActionMapper.addCauseAction(ret.getMetadata().getName(), cause);
 
                 return false;
             }
