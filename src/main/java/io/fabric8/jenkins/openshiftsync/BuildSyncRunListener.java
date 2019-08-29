@@ -553,6 +553,7 @@ public class BuildSyncRunListener extends RunListener<Run> {
                 return BuildPhases.RUNNING;
             } else {
                 Result result = run.getResult();
+                // TODO replace with switch case
                 if (result != null) {
                     if (result.equals(Result.SUCCESS)) {
                         return BuildPhases.COMPLETE;

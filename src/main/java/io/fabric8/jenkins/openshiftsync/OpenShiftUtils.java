@@ -505,10 +505,14 @@ public class OpenShiftUtils {
         logger.log(FINE, "setting build to {0} in namespace {1}/{2}",
                 new Object[] { phase, build.getMetadata().getNamespace(),
                         build.getMetadata().getName() });
-        getAuthenticatedOpenShiftClient().builds()
-                .inNamespace(build.getMetadata().getNamespace())
-                .withName(build.getMetadata().getName()).edit().editStatus()
-                .withPhase(phase).endStatus().done();
+
+        BuildStatus currentStatus = build.getStatus();
+        if (isNew(currentStatus) || isRunning(currentStatus) || isPending(currentStatus) ){
+          getAuthenticatedOpenShiftClient().builds()
+            .inNamespace(build.getMetadata().getNamespace())
+            .withName(build.getMetadata().getName()).edit().editStatus()
+            .withPhase(phase).endStatus().done();
+        }
     }
 
     /**
@@ -581,6 +585,14 @@ public class OpenShiftUtils {
 
     public static boolean isNew(BuildStatus buildStatus) {
         return buildStatus.getPhase().equals(NEW);
+    }
+
+    public static boolean isRunning(BuildStatus buildStatus) {
+      return buildStatus.getPhase().equals(RUNNING);
+    }
+
+    public static boolean isPending(BuildStatus buildStatus) {
+      return buildStatus.getPhase().equals(PENDING);
     }
 
     public static boolean isCancelled(BuildStatus status) {
