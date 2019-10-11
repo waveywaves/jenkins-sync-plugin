@@ -110,6 +110,7 @@ public abstract class BaseWatcher {
       LOGGER.info("Adding PodTemplate(s) for ");
       List<PodTemplate> finalSlaveList = new ArrayList<PodTemplate>();
         for (PodTemplate podTemplate : slaves) {
+          podTemplate = PodTemplateUtils.setProxyConfigToPodTemplate(podTemplate);
           PodTemplateUtils.addPodTemplate(this, type, apiObjName, namespace, finalSlaveList, podTemplate);
         }
         PodTemplateUtils.updateTrackedPodTemplatesMap(uid, finalSlaveList);
@@ -138,7 +139,8 @@ public abstract class BaseWatcher {
                 for (PodTemplate podTemplate : podTemplatesToTrack) {
                       // still do put here in case this is a new item from the last
                       // update on this ConfigMap/ImageStream
-                      PodTemplateUtils.addPodTemplate(this, type,null,null,null, podTemplate);
+                  podTemplate = PodTemplateUtils.setProxyConfigToPodTemplate(podTemplate);
+                  PodTemplateUtils.addPodTemplate(this, type,null,null,null, podTemplate);
                 }
             } else {
                 // The user modified the configMap to no longer be a
@@ -150,6 +152,7 @@ public abstract class BaseWatcher {
                 List<PodTemplate> finalSlaveList = new ArrayList<PodTemplate>();
                 for (PodTemplate podTemplate : slaves) {
                   // The user modified the api obj to be a jenkins-slave
+                  podTemplate = PodTemplateUtils.setProxyConfigToPodTemplate(podTemplate);
                   PodTemplateUtils.addPodTemplate(this, type, apiObjName, namespace, finalSlaveList, podTemplate);
                 }
                 PodTemplateUtils.updateTrackedPodTemplatesMap(uid, finalSlaveList);

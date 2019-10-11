@@ -5,14 +5,20 @@ import hudson.util.XStream2;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.api.model.Pod;
-import io.fabric8.openshift.api.model.*;
+import io.fabric8.openshift.api.model.Image;
+import io.fabric8.openshift.api.model.ImageStream;
+import io.fabric8.openshift.api.model.ImageStreamStatus;
+import io.fabric8.openshift.api.model.ImageStreamTag;
+import io.fabric8.openshift.api.model.TagReference;
 import jenkins.model.Jenkins;
 import org.csanchez.jenkins.plugins.kubernetes.KubernetesCloud;
+import org.csanchez.jenkins.plugins.kubernetes.PodEnvVar;
 import org.csanchez.jenkins.plugins.kubernetes.PodTemplate;
 import org.csanchez.jenkins.plugins.kubernetes.PodVolumes;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +52,7 @@ public class PodTemplateUtils {
   }
 
   public static PodTemplate podTemplateInit(String name, String image, String label) {
+    LOGGER.info("Initializing PodTemplate: "+name);
     PodTemplate podTemplate = new PodTemplate(image, new ArrayList<PodVolumes.PodVolume>());
     // with the above ctor guarnateed to have 1 container
     // also still force our image as the special case "jnlp" container for
@@ -61,6 +68,7 @@ public class PodTemplateUtils {
     podTemplate.setCommand("");
     podTemplate.setArgs("${computer.jnlpmac} ${computer.name}");
     podTemplate.setRemoteFs("/tmp");
+    podTemplate = setProxyConfigToPodTemplate(podTemplate);
     String podName = System.getenv().get("HOSTNAME");
     if (podName != null) {
       Pod pod = getAuthenticatedOpenShiftClient().pods().withName(podName).get();
@@ -147,6 +155,7 @@ public class PodTemplateUtils {
     KubernetesCloud kubeCloud = JenkinsUtils.getKubernetesCloud();
     if (kubeCloud != null) {
       LOGGER.info("Adding PodTemplate: " + podTemplate.getName());
+      podTemplate = setProxyConfigToPodTemplate(podTemplate);
       kubeCloud.addTemplate(podTemplate);
       try {
         // pedantic mvn:findbugs
@@ -184,6 +193,7 @@ public class PodTemplateUtils {
         String name = podTemplate.getName();
         // we allow configmap overrides of maven and nodejs, but not imagestream ones
         // as they are less specific/defined wrt podTemplate fields
+
         if (isReservedPodTemplateName(name) && isType.equals(type))
             return null;
         // for imagestreams, if the core image has not changed, we avoid
@@ -208,15 +218,17 @@ public class PodTemplateUtils {
         String name = podTemplate.getName();
         // we allow configmap overrides of maven and nodejs, but not imagestream ones
         // as they are less specific/defined wrt podTemplate fields
+        podTemplate = PodTemplateUtils.setProxyConfigToPodTemplate(podTemplate);
         if (apiObjName != null && namespace != null && podTemplates != null){
-            if (isReservedPodTemplateName(name) && isType.equals(type))
-                return;
-            String ret = podTemplateToApiType.putIfAbsent(name, type);
-            if (ret == null || ret.equals(type)) {
-              addPodTemplate(podTemplate);
-                podTemplates.add(podTemplate);
-            } else {
-                LOGGER.info(String.format(PT_NAME_CLAIMED, type, apiObjName, namespace, name, ret));
+
+              if (isReservedPodTemplateName(name) && isType.equals(type))
+                  return;
+              String ret = podTemplateToApiType.putIfAbsent(name, type);
+              if (ret == null || ret.equals(type)) {
+                  addPodTemplate(podTemplate);
+                  podTemplates.add(podTemplate);
+              } else {
+                  LOGGER.info(String.format(PT_NAME_CLAIMED, type, apiObjName, namespace, name, ret));
             }
         } else {
             podTemplateToApiType.put(name, type);
@@ -256,6 +268,42 @@ public class PodTemplateUtils {
       }
       results.addAll(extractPodTemplatesFromImageStreamTags(imageStream));
       return results;
+  }
+
+  protected static PodTemplate updatePodTemplateEnvVars(Map<String,String> map, PodTemplate podTemplate){
+      LOGGER.info("Updating PodTemplate EnvVars for "+podTemplate.getName());
+      List<PodEnvVar> envVars = podTemplate.getEnvVars();
+      if (envVars == null){
+        envVars = new ArrayList<PodEnvVar>();
+      }
+      LOGGER.info("Adding PodEnvVar for "+map.keySet().toString());
+      for (String key : map.keySet()){
+          PodEnvVar envVar = new PodEnvVar(key, map.get(key));
+          envVars.add(envVar);
+      }
+      podTemplate.setEnvVars(envVars);
+
+      try {
+        // pedantic mvn:findbugs
+        Jenkins jenkins = Jenkins.getInstance();
+        if (jenkins != null)
+          jenkins.save();
+      } catch (IOException e) {
+        LOGGER.log(Level.SEVERE, "updatePodTemplateEnvVars", e);
+      }
+
+      return podTemplate;
+  }
+
+  protected static PodTemplate setProxyConfigToPodTemplate(PodTemplate podTemplate){
+    LOGGER.fine("Setting Proxy Config for PodTemplate: "+podTemplate.getName());
+    Map envMap = new HashMap();
+    envMap.put("http_proxy", System.getenv("http_proxy"));
+    envMap.put("https_proxy", System.getenv("https_proxy"));
+    envMap.put("no_proxy", System.getenv("no_proxy"));
+    podTemplate = PodTemplateUtils.updatePodTemplateEnvVars(envMap, podTemplate);
+
+    return podTemplate;
   }
 
   protected static List<PodTemplate> extractPodTemplatesFromImageStreamTags(ImageStream imageStream) {
